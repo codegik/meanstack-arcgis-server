@@ -51,7 +51,6 @@ export class MapSocket {
     private addDonor(donor: IDonor): void {
         donor.ip = this.remoteAddress; 
         console.log("SAVING %s", donor.firstName);
-        console.log(donor);
         Donor.create(donor, (error: any, donor: IDonor) => {
             let response = {};
             if (error) {
