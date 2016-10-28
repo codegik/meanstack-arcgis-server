@@ -1,118 +1,118 @@
 import { IDonor, Donor } from "../models";
 
 export class MapSocket {
-    private socket: any;
     private nsp: any;
-    private remoteAddress: any;
 
 
     constructor(private io: any) {
         this.nsp = this.io.of("/map");
         this.nsp.on("connection", (socket: any) => {
-            console.log(this.socket);
-            this.socket = socket;
-            this.remoteAddress = socket.client.conn.remoteAddress;
-            this.listen();
-            console.log("Client connected [%s]", this.remoteAddress);
+            this.disconnectHandler(socket);
+            this.addDonorHandler(socket);
+            this.updateDonorHandler(socket);
+            this.findDonorsHandler(socket);
+            this.findMyRegisterHandler(socket);
+            this.unsubscribeHandler(socket);
+            console.log("[%s]: CONNECTED %s", socket.id, socket.client.conn.remoteAddress);
         });
     }
-
     
-    // Socket Handler
-    private listen(): void {
-        this.socket.on("disconnect", () => this.disconnect());
-        this.socket.on("addDonor", (donor: IDonor) => this.addDonor(donor));
-        this.socket.on("updateDonor", (donor: IDonor) => this.updateDonor(donor));
-        this.socket.on("findDonors", (lat: number, log: number) => this.findDonors(lat, log));
-        this.socket.on("findMyRegister", () => this.findMyRegister());
-        this.socket.on("unsubscribe", (donor: IDonor) => this.unsubscribe(donor));
-    }
 
     // Update donor and broadcast for all connected clients
-    private updateDonor(donor: IDonor): void {
-        donor.ip = this.remoteAddress; 
-        console.log("UPDATING %s", donor.firstName);
-        console.log(donor);
-        
-        Donor.update(donor, (error: any) => {
-            let response = {};
-            if (error) {
-                response = {error: error, message: 'Database error', object: null}; 
-                console.log(response);
-            } else {
-                response = {error: null, message: null, object: donor};
-                this.nsp.emit("updatedDoner", donor);
-            }
-            this.socket.emit("addedDonorResponse", response);
-        });
+    private updateDonorHandler(socket: any): void {
+    	socket.on("updateDonor", (donor: IDonor) => {
+    		console.log("[%s]: UPDATING %s", socket.id, donor.firstName);
+    		
+	        donor.ip = socket.client.conn.remoteAddress; 
+	        
+	        Donor.findOneAndUpdate({emailAddress: donor.emailAddress}, donor, {upsert:true}, (error: any) => {
+	            let response = {};
+	            if (error) {
+	                response = {error: error, message: 'Database error', object: null}; 
+	                console.log(response);
+	            } else {
+	                response = {error: null, message: null, object: donor};
+	                socket.broadcast.emit("updatedDoner", donor);
+	            }
+	            socket.emit("updatedDonerResponse", response);
+	        });
+    	});
     }
 
     // Add new donor and broadcast for all connected clients
-    private addDonor(donor: IDonor): void {
-        donor.ip = this.remoteAddress; 
-        console.log("SAVING %s", donor.firstName);
-        Donor.create(donor, (error: any, donor: IDonor) => {
-            let response = {};
-            if (error) {
-                response = {error: error, message: 'Database error', object: null}; 
-                console.log(response);
-            } else {
-                response = {error: null, message: null, object: donor};
-                this.nsp.emit("addedDonor", donor);
-            }
-            this.socket.emit("addedDonorResponse", response);
-        });
+    private addDonorHandler(socket: any): void {
+    	socket.on("addDonor", (donor: IDonor) => {
+    		console.log("[%s]: SAVING %s", socket.id, donor.firstName);
+    		
+	        donor.ip = socket.client.conn.remoteAddress; 
+	        Donor.create(donor, (error: any, donor: IDonor) => {
+	            let response = {error: null, message: null, object: null};
+	            if (error) {
+	                response = {error: error, message: 'Database error', object: null}; 
+	                console.log(response);
+	            } else {
+	                response.object = donor;
+	                socket.broadcast.emit("addedDonor", donor);
+	            }
+	            Donor.findOne({emailAddress: donor.emailAddress}).exec((error: any, donor: IDonor) => {
+		            if (!error && donor) {
+		            	response.object = donor;
+		            	socket.emit("addedDonorResponse", response);
+		            }
+		        });
+	        });
+    	});
     }
 
     // Delete donor and broadcast for all connected clients
-    private unsubscribe(donor: IDonor): void {
-        Donor.remove({ _id: donor._id }, (error: any) => {
-            if (error) {
-                console.log(error);
-            } else {
-                this.nsp.emit("unsubscribed", donor);
-            }
-        });
+    private unsubscribeHandler(socket: any): void {
+    	socket.on("unsubscribe", (donor: IDonor) => {
+    		console.log("[%s]: DELETING %s", socket.id, donor.firstName);
+    		
+	        Donor.remove({ _id: donor._id }, (error: any) => {
+	            if (error) {
+	                console.log(error);
+	            } else {
+	            	socket.broadcast.emit("unsubscribed", donor);
+	            	socket.emit("unsubscribed", donor);
+	            }
+	        });
+    	});
     }
 
     // Find donors and return for the client
-    private findDonors(lat: number, log: number): void {
-        // TODO: create a query fintering by geolocation proximity
-        let variation     = 1000;
-        let latitudeMin   = lat - variation;
-        let latitudeMax   = lat + variation;
-        let longitudeMin  = log - variation;
-        let longitudeMax  = log + variation;
-
-        Donor.find(
-          {
-            $or: [
-              {"latitude" : {$gt: latitudeMin, $lt: latitudeMax}},
-              {"longitude" : {$gt: longitudeMin, $lt: longitudeMax}}
-            ]
-          }
-        );
-        Donor.find().exec((error: any, donors: IDonor[]) => {
-            if (!error && donors) {
-                this.socket.emit("findedDonorsResponse", donors);
-            }
-        });
+    private findDonorsHandler(socket: any): void {
+    	socket.on("findDonors", (lat: number, log: number) => {
+    		console.log("[%s]: FINDING ALL", socket.id);
+    		
+	        Donor.find().exec((error: any, donors: IDonor[]) => {
+	            if (!error && donors) {
+	            	socket.emit("findedDonorsResponse", donors);
+	            }
+	        });
+    	});
     }
   
 
-    private findMyRegister(): void {
-        Donor.find({"ip": this.remoteAddress}).limit(1).exec((error: any, donor: IDonor) => {
-            if (!error && donor) {
-                this.socket.emit("findMyRegisterResponse", donor[0]);
-            } else {
-                console.log(error);
-            }
-        });
+    private findMyRegisterHandler(socket: any): void {
+    	socket.on("findMyRegister", () => {
+    		console.log("[%s]: FINDING ONE", socket.id);
+
+	        Donor.find({"ip": socket.client.conn.remoteAddress}).limit(1).exec((error: any, donor: IDonor) => {
+	            if (!error && donor) {
+	            	socket.emit("findMyRegisterResponse", donor[0]);
+	            } else {
+	                console.log(error);
+	            }
+	        });
+    	});
     }
 
     
-    private disconnect(): void {
-        console.log("Client disconnected");
+    private disconnectHandler(socket: any): void {
+        socket.on("disconnect", () => {
+        	console.log("[%s]: DISCONECTED", socket.id);
+        });
     }
   
 }

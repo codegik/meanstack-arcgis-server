@@ -36,12 +36,12 @@ class Server {
 
         // Create database connections
         this.databases();
+        
+        // Start listening
+        this.listen();
 
         // Handle websockets
         this.sockets();
-
-        // Start listening
-        this.listen();
     }
 
     // Configuration
@@ -92,7 +92,7 @@ class Server {
 
         //start listening on port
         this.server.on("listening", () => {
-            console.log('==> Listening on port %s. Open up http://localhost:%s/ in your browser.', this.port, this.port);            
+            console.log('==> Listening on port %s.', this.port);            
         });
     }
 }
